@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tia Tay Coleta</title>
+<link rel="icon" href="icon-192.png">
+<meta name="theme-color" content="#0d0a10">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tia Tay">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><span class="brand"><span class="logo sm" role="img" aria-label="Logo Tia Tay"></span><b>Tia Tay Coleta</b></span><span><span id="st"></span> <button class="avbtn" id="me" data-a="nav" data-v="per" aria-label="Meu perfil" hidden></button> <button class="btn" id="out" data-a="out" hidden>Sair</button></span></header>
+<main id="main"></main>
+<nav>
+<button data-a="nav" data-v="pac" data-r="af">Pacientes</button>
+<button data-a="nav" data-v="ses" data-r="af">Sessão</button>
+<button data-a="nav" data-v="gra" data-r="af">Gráficos</button>
+<button data-a="nav" data-v="cal" data-r="afp">Agenda</button>
+<button data-a="nav" data-v="avi" data-r="afp">Avisos</button>
+<button data-a="nav" data-v="cha" data-r="afp">Chat</button>
+<button data-a="nav" data-v="dad" data-r="af">Dados</button>
+<button data-a="nav" data-v="eq" data-r="a">Equipe</button>
+</nav>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="App.js"></script>
+</body>
+</html>
