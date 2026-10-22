@@ -116,3 +116,6 @@ main.wide{max-width:900px}
  .paper hr.pgbr{border:0;page-break-after:always}
  .ponly{display:block;order:-1}.ponly h1{color:#5a189a}
 }
+
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.btn.ce.big{width:100%}

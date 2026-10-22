@@ -52,7 +52,7 @@ function after(){
  clearTimeout(tid);
  tid=setTimeout(()=>{
   if(!user)return;
-  const ae=document.activeElement||{},typing=['INPUT','TEXTAREA','SELECT'].includes(ae.tagName)&&ae.id!=='cm';
+  const ae=document.activeElement||{},typing=['INPUT','TEXTAREA','SELECT'].includes(ae.tagName)&&ae.id!=='cm'&&ae.id!=='rin';
   if(!ses&&!eg&&!ed&&!typing)render();
  },120);
 }
@@ -96,12 +96,13 @@ function startShared(){
  const cl=(q,set)=>UNS.push(q.onSnapshot(s=>{set(s.docs.map(d=>({...d.data(),id:d.id})));after()},e=>console.warn('coms',e.code)));
  if(r==='a')cl(mc,v=>comsA=v);
  else{cl(mc.where('to','==','t'),v=>comsA=v);cl(mc.where('to','==',r==='p'?'p':'f'),v=>comsB=v)}
+ if(r==='a'){UNS.push(fs.collection('config').doc('rafael').onSnapshot(s=>{RAFCFG=s.exists?s.data():null;after()},e=>{RAFCFG=null;console.warn('rafael cfg',e.code)}));UNS.push(fs.collection('rafael').orderBy('t').limitToLast(200).onSnapshot(s=>{RAF=s.docs.map(d=>({...d.data(),id:d.id}));after()},e=>console.warn('rafael',e.code)))}
  if(r!=='p'){const rc=fs.collection('reports');UNS.push((r==='a'?rc:rc.where('k','==',user.k)).onSnapshot(s=>{REPS=s.docs.map(d=>({...d.data(),id:d.id}));after()},e=>console.warn('reports',e.code)))}
 }
 function stopAll(){
  UNS.splice(0).forEach(f=>{try{f()}catch(e){}});
  [LS,CACHE,LAST].forEach(o=>Object.keys(o).forEach(k=>delete o[k]));
- U=[];uMap={};CHATS=[];comsA=[];comsB=[];REPS=[];ed=null;relPid='';
+ U=[];uMap={};CHATS=[];comsA=[];comsB=[];REPS=[];ed=null;relPid='';RAFCFG=undefined;RAF=[];rafBusy=false;rafMsg='';rafEdit=false;
 }
 /* cria o login de outra pessoa sem deslogar a administradora (usa um segundo "app" do Firebase) */
 async function criarConta(k,senha){
@@ -187,12 +188,12 @@ function vPac(){
  if(!cur)return '<h2>Pacientes</h2><div class="card"><input id="pn" placeholder="Nome do paciente"><button class="btn pr big" data-a="addp">Adicionar paciente</button></div>'+(db.patients.map(p=>`<div class="card row2"><span><b>${esc(p.name)}</b><br><span class="mu">${p.programs.length} programa(s)</span></span><button class="btn" data-a="open" data-id="${p.id}">Abrir</button></div>`).join('')||'<p class="mu">Nenhum paciente ainda. Adicione o primeiro acima.</p>');
  const p=P(cur);if(!p){cur=null;return vPac()}
  if(eg)return vGForm(p);
- return `<button class="lnk" data-a="back">‹ Pacientes</button><h2>${esc(p.name)}</h2>`+p.programs.map(g=>`<div class="card"><b>${esc(g.name)}</b><div class="mu">${TYPES[g.type]}, ${g.items.length} itens${(g.helps||[]).length?'. Ajuda: '+g.helps.join(', ')+(g.helpsNote?' ('+esc(g.helpsNote)+')':''):''}</div>${g.desc?`<p class="mu">${esc(g.desc)}</p>`:''}<div class="row"><button class="btn pr" data-a="start" data-id="${g.id}">Iniciar sessão</button><button class="btn" data-a="gedit" data-id="${g.id}">Editar</button></div></div>`).join('')+'<button class="btn pr big" data-a="gnew">Novo programa</button>';
+ return `<button class="lnk" data-a="back">‹ Pacientes</button><h2>${esc(p.name)}</h2>`+p.programs.map(g=>`<div class="card"><b>${esc(g.name)}</b><div class="mu">${TYPES[g.type]}, ${g.items.length} itens${(g.helps||[]).length?'. Ajuda: '+g.helps.join(', ')+(g.helpsNote?' ('+esc(g.helpsNote)+')':''):''}</div>${g.desc?`<p class="mu">${esc(g.desc)}</p>`:''}<div class="row"><button class="btn pr" data-a="start" data-id="${g.id}">Iniciar sessão</button><button class="btn" data-a="gedit" data-id="${g.id}">Editar</button></div></div>`).join('')+'<button class="btn pr big" data-a="gnew">Novo programa</button>'+(roleOf(user)==='a'?`<button class="btn ce big" style="margin-top:14px" data-a="pdelp" data-id="${p.id}">${delAsk==='p'+p.id?'Confirmar: excluir paciente, sessões e agenda':'Excluir paciente'}</button>`:'');
 }
 function vGForm(p){
  const g=eg==='new'?{name:'',type:'dtt',desc:'',helps:[],items:[]}:p.programs.find(x=>x.id===eg);
  if(!g){eg=null;return vPac()}
- return `<button class="lnk" data-a="gcancel">‹ Voltar</button><h2>${eg==='new'?'Novo programa':'Editar programa'}</h2><div class="card"><label for="gn">Nome</label><input id="gn" value="${esc(g.name)}"><label for="gt">Tipo de ensino</label><select id="gt">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}" ${k===g.type?'selected':''}>${v}</option>`).join('')}</select><label for="gd">Descrição do programa</label><textarea id="gd" rows="3">${esc(g.desc||'')}</textarea><label>Tipos de ajuda usados</label><div style="margin-bottom:10px">${HELPS.map(h=>`<button class="chip ${(g.helps||[]).includes(h)?'on':''}" data-a="gh" data-k="${h}">${h}</button>`).join('')}</div><div id="gvw" style="margin-bottom:10px" ${(g.helps||[]).includes('Variadas')?'':'hidden'}><label for="gv">Quais ajudas variadas? Escreva aqui</label><input id="gv" value="${esc(g.helpsNote||'')}" placeholder="Ex.: toque no ombro, apontar, dica sonora"></div><label for="gi">Alvos ou passos (um por linha)</label><textarea id="gi" rows="5">${esc(g.items.join('\n'))}</textarea><button class="btn pr big" data-a="gsave">Salvar programa</button>${eg==='new'?'':`<div class="row"><button class="btn ce" data-a="gdel">${delAsk==='g'+eg?'Confirmar exclusão':'Excluir programa'}</button></div>`}</div>`;
+ return `<button class="lnk" data-a="gcancel">‹ Voltar</button><h2>${eg==='new'?'Novo programa':'Editar programa'}</h2><div class="card"><label for="gn">Nome</label><input id="gn" value="${esc(g.name)}"><label for="gt">Tipo de ensino</label><select id="gt">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}" ${k===g.type?'selected':''}>${v}</option>`).join('')}</select><label for="gd">Descrição do programa</label><textarea id="gd" rows="3">${esc(g.desc||'')}</textarea><label>Tipos de ajuda usados</label><div style="margin-bottom:10px">${HELPS.map(h=>`<button class="chip ${(g.helps||[]).includes(h)?'on':''}" data-a="gh" data-k="${h}">${h}</button>`).join('')}</div><div id="gvw" style="margin-bottom:10px" ${(g.helps||[]).includes('Variadas')?'':'hidden'}><label for="gv">Quais ajudas variadas? Escreva aqui</label><input id="gv" value="${esc(g.helpsNote||'')}" placeholder="Ex.: toque no ombro, apontar, dica sonora"></div><label for="gi">Alvos ou passos (um por linha)</label><textarea id="gi" rows="5">${esc(g.items.join('\n'))}</textarea><button class="btn pr big" data-a="gsave">Salvar programa</button>${eg==='new'||roleOf(user)!=='a'?'':`<div class="row"><button class="btn ce" data-a="gdel">${delAsk==='g'+eg?'Confirmar exclusão':'Excluir programa'}</button></div>`}</div>`;
 }
 function vSes(){
  if(!ses)return '<h2>Sessão</h2><p class="mu">Abra um paciente e toque em “Iniciar sessão”.</p>';
@@ -502,17 +503,120 @@ document.addEventListener('paste',e=>{
 document.addEventListener('visibilitychange',()=>{if(document.hidden)saveRep()});
 addEventListener('pagehide',()=>saveRep());
 
-const ALLOW={a:['pac','ses','gra','rel','cal','dad','eq','avi','cha','per'],f:['pac','ses','gra','rel','cal','dad','avi','cha','per'],p:['cal','avi','cha','per']};
+/* ---------- Rafael: assistente de IA exclusivo da administradora ---------- */
+let RAFCFG,RAF=[],rafBusy=false,rafMsg='',rafEdit=false;
+const REPBODY={};
+const fdt=s=>{try{return new Date(s).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(e){return ''}};
+const cut=(s,n)=>{s=String(s==null?'':s);return s.length>n?s.slice(0,n)+'…':s};
+const rxe=x=>x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+const allPats=()=>staff().flatMap(u=>load(u.k).patients);
+/* troca nomes de pacientes por códigos antes de enviar para a IA (proteção parcial) */
+function anonTxt(t){
+ let s=String(t);
+ const ps=allPats().filter(p=>p.name&&p.name.trim().length>2).sort((a,b)=>b.name.length-a.name.length);
+ ps.forEach(p=>{s=s.replace(new RegExp(rxe(p.name.trim()),'gi'),'Paciente_'+p.id)});
+ const fc={};ps.forEach(p=>{const f=p.name.trim().split(/\s+/)[0];fc[f]=(fc[f]||0)+1});
+ ps.forEach(p=>{const f=p.name.trim().split(/\s+/)[0];if(f.length<4||fc[f]!==1)return;
+  let r;try{r=new RegExp('(?<![\\p{L}\\d_])'+rxe(f)+'(?![\\p{L}\\d_])','gu')}catch(e){r=new RegExp('\\b'+rxe(f)+'\\b','g')}
+  s=s.replace(r,'Paciente_'+p.id)});
+ return s;
+}
+const unanon=t=>{const m={};allPats().forEach(p=>m[p.id]=p.name);return String(t).replace(/Paciente_([a-z0-9]+)/g,(x,id)=>m[id]||x)};
+const rafHtml=t=>esc(unanon(t)).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
+const rafUrl=u=>{u=u.replace(/\/+$/,'');if(/\/chat\/completions$/.test(u))return u;if(/\/v\d+$/.test(u))return u+'/chat/completions';return u+'/v1/chat/completions'};
+async function repText(m){
+ const c=REPBODY[m.id];if(c&&c.u===m.updated)return c.t;
+ const sn=await fs.collection('reports').doc(m.id).collection('content').doc('body').get();
+ let h=sn.exists?(sn.data().html||''):'';
+ h=h.replace(/<img[^>]*>/gi,' [imagem] ').replace(/<br\s*\/?>/gi,'\n').replace(/<\/(p|div|h[1-6]|li|tr|blockquote)>/gi,'\n').replace(/<\/(td|th)>/gi,' | ');
+ const t=(new DOMParser().parseFromString(h,'text/html').body.textContent||'').replace(/\n{3,}/g,'\n\n').trim();
+ REPBODY[m.id]={u:m.updated,t};return t;
+}
+/* monta, a cada pergunta, um resumo atual de tudo que a Tia Tay enxerga no sistema */
+async function rafCtx(cfg){
+ const anon=cfg.anon!==false,stf=staff(),out=[];
+ const pn=(d,id)=>{const p=d.patients.find(x=>x.id===id);return p?(anon?'Paciente_'+p.id:p.name):'Paciente removido'};
+ out.push('Agora: '+new Date().toLocaleString('pt-BR'));
+ out.push('\n## EQUIPE\n'+(stf.filter(u=>!u.admin).map(u=>'- '+u.name+' (funcionária)').join('\n')||'(sem funcionárias)'));
+ let h='\n## PACIENTES E PROGRAMAS';
+ stf.forEach(u=>{const d=load(u.k);if(!d.patients.length)return;h+='\n### Profissional: '+u.name;d.patients.forEach(p=>{h+='\n- '+(anon?'Paciente_'+p.id:p.name)+': '+(p.programs.length?p.programs.map(g=>g.name+' ('+TYPES[g.type]+', '+g.items.length+' itens'+((g.helps||[]).length?', ajuda: '+g.helps.join('/'):'')+')').join('; '):'sem programas')})});
+ out.push(h);
+ const ss=[];stf.forEach(u=>{const d=load(u.k);d.sessions.forEach(s=>ss.push({u,s,d}))});ss.sort((a,b)=>a.s.date<b.s.date?1:-1);
+ out.push('\n## SESSÕES REALIZADAS (mais recentes primeiro; total '+ss.length+')\n'+(ss.slice(0,300).map(({u,s,d})=>{const p=pct(s),mn=s.end?Math.round((new Date(s.end)-new Date(s.date))/60000):null,bh=Object.entries(s.beh||{}).filter(([,v])=>v).map(([k,v])=>k+' '+v).join(', ');return '- '+fdt(s.date)+' | '+u.name+' | '+pn(d,s.pid)+' | '+(s.prog?s.prog.name:'?')+' | '+(mn!=null?mn+' min | ':'')+p.n+' tentativas: Ind '+p.i+'%, Ajuda '+p.a+'%, Erro '+p.e+'%'+(s.h?' | ajuda usada: '+s.h:'')+(bh?' | comportamentos: '+bh:'')+((s.rf||[]).length?' | reforçadores: '+s.rf.join(', '):'')+(s.obs?' | obs: '+cut(s.obs,250):'')}).join('\n')||'(nenhuma sessão)'));
+ const ag=[],lim=new Date(Date.now()-30*864e5).toISOString().slice(0,10);
+ stf.forEach(u=>{const d=load(u.k);(d.agenda||[]).forEach(a=>{if(a.date>=lim)ag.push({u,a,d})})});
+ ag.sort((x,y)=>(x.a.date+x.a.time)<(y.a.date+y.a.time)?-1:1);
+ out.push('\n## AGENDA (últimos 30 dias e próximos)\n'+(ag.map(({u,a,d})=>'- '+a.date+' '+a.time+' | '+u.name+' | '+pn(d,a.pid)+' | '+aStat(a,d).t+(a.note?' | '+cut(a.note,150):'')).join('\n')||'(sem agendamentos)'));
+ const th={};CHATS.forEach(m=>(th[m.th]=th[m.th]||[]).push(m));
+ let c='\n## CONVERSAS DO CHAT (Tia Tay com cada pessoa)';
+ Object.keys(th).forEach(k=>{
+  const u=allUsers().find(x=>x.k===k),pp=u&&u.kid?allPats().find(p=>p.id===u.kid.pid):null;
+  const nx=u?(anon&&u.role==='pai'?'Responsável'+(pp?' de Paciente_'+pp.id:''):u.name):k;
+  c+='\n### Conversa com '+nx+'\n'+th[k].slice(-60).map(m=>'['+fdt(m.t)+'] '+(m.from===ADMIN.k?'Tia Tay':nx)+': '+cut(m.txt,300)).join('\n');
+ });
+ out.push(c);
+ const cm2=coms().sort((a,b)=>a.t<b.t?-1:1).slice(-10);
+ if(cm2.length)out.push('\n## COMUNICADOS ENVIADOS\n'+cm2.map(x=>'- ['+fdt(x.t)+'] '+x.title+': '+cut(x.txt,300)).join('\n'));
+ const rp=[...REPS].sort((a,b)=>a.updated<b.updated?1:-1);
+ let r='\n## RELATÓRIOS (total '+rp.length+'; texto completo dos mais recentes)',bud=70000;
+ for(const m of rp.slice(0,40)){
+  let t='';try{t=await repText(m)}catch(e){t='(não foi possível ler)'}
+  const body=cut(t,Math.min(4000,Math.max(300,bud)));bud-=body.length;
+  r+='\n### '+m.title+' | Paciente: '+(anon?'Paciente_'+m.pid:m.pname)+' | Profissional: '+((allUsers().find(u=>u.k===m.k)||{}).name||m.k)+' | Atualizado: '+fdt(m.updated)+'\n'+body;
+ }
+ rp.slice(40).forEach(m=>{r+='\n- (só título) '+m.title+' | '+(anon?'Paciente_'+m.pid:m.pname)+' | '+fdt(m.updated)});
+ out.push(r);
+ let ctx=out.join('\n');if(anon)ctx=anonTxt(ctx);
+ return cut(ctx,240000);
+}
+const RAF_SYS='Você é o Rafael, assistente exclusivo da Tia Tay (administradora) no sistema Tia Tay Coleta, de uma clínica de desenvolvimento infantil e neurodivergências que trabalha com ABA. Responda sempre em português do Brasil, de forma clara, organizada e objetiva. Use SOMENTE os dados do sistema abaixo. Se algo não estiver nos dados, diga que não tem essa informação e não invente números. Você apenas analisa e explica: não executa ações no sistema (não exclui nem altera nada). Os dados são sigilosos e são de crianças: trate com cuidado. Os pacientes podem aparecer como "Paciente_código"; ao citá-los, use exatamente esse código. Nas sessões, "Ind" é resposta independente (correta, sem ajuda), "Ajuda" é resposta com ajuda e "Erro" é erro.';
+async function rafSend(txt){
+ const cfg=RAFCFG;txt=(txt||'').trim();if(!cfg||rafBusy||!txt)return;
+ rafBusy=true;rafMsg='';
+ const um={id:uid(),role:'user',txt,t:new Date().toISOString()};RAF.push(um);fs.collection('rafael').doc(um.id).set(um).catch(erro);render();
+ try{
+  const A=x=>cfg.anon!==false?anonTxt(x):x,ctx=await rafCtx(cfg);
+  const msgs=[{role:'system',content:RAF_SYS+'\n\n# DADOS ATUAIS DO SISTEMA\n'+ctx}].concat(RAF.slice(-13).map(m=>({role:m.role,content:A(m.txt)})));
+  const ctl=new AbortController(),to=setTimeout(()=>ctl.abort(),150000);
+  let res;
+  try{res=await fetch(cfg.url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.key},body:JSON.stringify({model:cfg.model,messages:msgs,temperature:0.3}),signal:ctl.signal})}
+  finally{clearTimeout(to)}
+  const js=await res.json().catch(()=>null);
+  if(!res.ok){const er=js&&(js.error&&(js.error.message||js.error)||js.message);throw new Error(typeof er==='string'?er:'Erro '+res.status)}
+  let out=js&&js.choices&&js.choices[0]&&js.choices[0].message&&js.choices[0].message.content;
+  if(!out)throw new Error('A API respondeu vazio.');
+  out=String(out).replace(/<think>[\s\S]*?<\/think>/g,'').trim();
+  const am={id:uid(),role:'assistant',txt:out,t:new Date().toISOString()};RAF.push(am);fs.collection('rafael').doc(am.id).set(am).catch(erro);
+ }catch(e){
+  rafMsg=e.name==='AbortError'?'A API demorou demais. Tente de novo.':(e instanceof TypeError?'Não consegui falar com a API. Veja a internet, o link da API e se ela aceita chamadas do navegador.':'Erro da API: '+e.message);
+ }
+ rafBusy=false;render();
+}
+function vRafCfg(){
+ const c=RAFCFG||{};
+ return `<h2>Rafael</h2><div class="card"><h3>${RAFCFG?'Trocar a API do Rafael':'Conectar o Rafael'}</h3><p class="mu">Informe o link da API, a chave e o modelo. Fica salvo na nuvem (só a administradora lê) e não será pedido de novo.</p><label for="rcu">Link da API (https)</label><input id="rcu" value="${esc(c.url||'https://api.apinex.bond/v1/chat/completions')}" autocapitalize="none" autocomplete="off"><label for="rck">Chave da API</label><input id="rck" type="password" autocomplete="off" placeholder="${RAFCFG?'Deixe em branco para manter a chave atual':'sk-...'}"><label for="rcm">Modelo</label><input id="rcm" value="${esc(c.model||'free/deepseek-v4.1-flash')}" autocapitalize="none" autocomplete="off"><label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px"><input id="rca" type="checkbox" style="width:auto;margin:4px 0 0" ${c.anon===false?'':'checked'}><span>Proteger nomes dos pacientes (a IA recebe códigos no lugar dos nomes)</span></label><p class="am" id="am"></p><button class="btn pr big" data-a="rcsave">Salvar</button>${RAFCFG?'<div style="height:8px"></div><button class="btn big" data-a="rccancel">Cancelar</button>':''}</div>`;
+}
+function vRaf(){
+ if(RAFCFG===undefined)return '<h2>Rafael</h2><p class="mu">Carregando...</p>';
+ if(!RAFCFG||rafEdit)return vRafCfg();
+ const sug=['Faça um resumo das sessões da última semana','Quais pacientes tiveram queda no desempenho?','Resuma os relatórios mais recentes','O que as funcionárias conversaram comigo no chat?'];
+ return `<div class="chead"><b>Rafael</b><span class="mu">assistente da Tia Tay</span></div><div class="row" style="margin:0 0 10px"><button class="btn" data-a="rccfg">Trocar API</button><button class="btn" data-a="rclear">${delAsk==='rf'?'Confirmar limpar':'Limpar conversa'}</button></div><div class="msgs">${RAF.map(m=>`<div class="bub ${m.role==='user'?'me':'ot'}">${rafHtml(m.txt)}<small>${hm(m.t)}</small></div>`).join('')||'<p class="mu">Pergunte sobre relatórios, sessões, pacientes, agenda ou conversas do chat.</p>'}${rafBusy?'<div class="bub ot">Rafael está pensando...</div>':''}${rafMsg?`<div class="bub ot" style="border-color:var(--er);color:var(--er)">${esc(rafMsg)}</div>`:''}</div>${RAF.length?'':'<div class="chips">'+sug.map(q=>`<button class="chip" data-a="rchip" data-q="${esc(q)}">${esc(q)}</button>`).join('')+'</div>'}<div class="cbar"><input id="rin" placeholder="Pergunte ao Rafael" autocomplete="off"><button class="btn pr" data-a="rsend">Enviar</button></div>`;
+}
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&e.target.id==='rin'){e.preventDefault();const b=document.querySelector('[data-a=rsend]');if(b)b.click()}});
+
+const ALLOW={a:['pac','ses','gra','rel','cal','dad','eq','avi','cha','raf','per'],f:['pac','ses','gra','rel','cal','dad','avi','cha','per'],p:['cal','avi','cha','per']};
 function render(){
+ const ri=$('#rin'),keepR=ri?ri.value:'',focR=!!ri&&document.activeElement===ri;
  if(ed&&ed.html!==null&&$('#paper')){ed.html=$('#paper').innerHTML;const t=$('#rt');if(t)ed.title=t.value}
  const r=user?roleOf(user):'',ci=$('#cm'),keep=ci?ci.value:'',foc=!!ci&&document.activeElement===ci;
  if(user&&!ALLOW[r].includes(view))view=r==='p'?'cal':'pac';
  $('nav').style.display=user?'flex':'none';$('#out').hidden=!user;$('#me').hidden=!user;
  if(user)$('#me').innerHTML=av(user.k,user.name);
- const bar=r==='a'&&!['eq','avi','cha','per'].includes(view)&&!(view==='rel'&&ed)?`<div class="vbar"><label for="vs">Ver dados de</label><select id="vs">${staff().map(u=>`<option value="${u.k}" ${u.k===vk?'selected':''}>${esc(u.name)}</option>`).join('')}</select></div>`:'';
- $('#main').innerHTML=user?bar+({pac:vPac,ses:vSes,gra:vGra,cal:r==='p'?vAgPai:vCal,dad:vDad,rel:vRel,eq:vEq,avi:vAvi,cha:vCha,per:vPer})[view]():vAuth();
+ const bar=r==='a'&&!['eq','avi','cha','per','raf'].includes(view)&&!(view==='rel'&&ed)?`<div class="vbar"><label for="vs">Ver dados de</label><select id="vs">${staff().map(u=>`<option value="${u.k}" ${u.k===vk?'selected':''}>${esc(u.name)}</option>`).join('')}</select></div>`:'';
+ $('#main').innerHTML=user?bar+({pac:vPac,ses:vSes,gra:vGra,cal:r==='p'?vAgPai:vCal,dad:vDad,rel:vRel,raf:vRaf,eq:vEq,avi:vAvi,cha:vCha,per:vPer})[view]():vAuth();
  document.querySelectorAll('nav button').forEach(b=>{b.dataset.l=b.dataset.l||b.textContent;b.classList.toggle('on',b.dataset.v===view);b.hidden=!(user&&b.dataset.r.includes(r));const n=user?(b.dataset.v==='cha'?unreadChat():b.dataset.v==='avi'?unreadCom():0):0;b.textContent=b.dataset.l+(n?' ('+n+')':'')});
  $('#st').textContent=navigator.onLine?'Online':'Offline';
+ {const rn=$('#rin');if(rn){rn.value=keepR;if(focR)rn.focus();scrollTo(0,document.body.scrollHeight)}}
  $('#main').classList.toggle('wide',!!(user&&view==='rel'&&ed));
  if(ed&&$('#rs'))setRs(ed.err?'':ed.dirty?'Alterações não salvas':'Salvo');
  if(flash){const el=$('#'+flash.id);if(el){el.style.color=flash.ok?'var(--ok)':'';el.textContent=flash.txt}}
@@ -541,7 +645,7 @@ else if(a==='nav'){if(ed){saveRep();ed=null}relPid='';view=d.v;msg='';delAsk='';
   if(eg==='new')p.programs.push({id:uid(),...v});else Object.assign(p.programs.find(x=>x.id===eg),v);
   save();eg=null;
  }
- else if(a==='gdel'){if(delAsk==='g'+eg){const p=P(cur);p.programs=p.programs.filter(x=>x.id!==eg);save();eg=null;delAsk=''}else delAsk='g'+eg}
+ else if(a==='gdel'){if(roleOf(user)!=='a')return;if(delAsk==='g'+eg){const p=P(cur);p.programs=p.programs.filter(x=>x.id!==eg);save();eg=null;delAsk=''}else delAsk='g'+eg}
  else if(a==='start'){const g=P(cur).programs.find(x=>x.id===d.id);ses={id:uid(),pid:cur,date:new Date().toISOString(),prog:JSON.parse(JSON.stringify(g)),trials:{},beh:{},rf:[],obs:'',h:(g.helps||[])[0]||''};g.items.forEach(i=>ses.trials[i]=[]);view='ses'}
  else if(a==='sh')ses.h=d.k;
  else if(a==='t')ses.trials[ses.prog.items[d.n]].push(d.c==='a'&&ses.h?'a|'+ses.h:d.c);
@@ -575,6 +679,13 @@ else if(a==='imp'){try{const x=JSON.parse($('#bk').value);if(x.patients&&x.sessi
  else if(a==='rclose'){saveRep();ed=null}
  else if(a==='rnew'){const pt=P(relPid);if(!pt)return;const now=new Date().toISOString(),m={id:uid(),k:vk,pid:pt.id,pname:pt.name,title:'Relatório '+new Date().toLocaleDateString('pt-BR'),by:user.k,byName:user.name,created:now,updated:now,size:1};REPS.push(m);const b=fs.batch(),rd=fs.collection('reports').doc(m.id);b.set(rd,m);b.set(rd.collection('content').doc('body'),{k:m.k,html:'<p><br></p>',updated:now});b.commit().catch(erro);openRep(m.id);return}
  else if(a==='rdel'){if(delAsk==='r'+d.id){const id=d.id,rd=fs.collection('reports').doc(id),b=fs.batch();REPS=REPS.filter(x=>x.id!==id);b.delete(rd.collection('content').doc('body'));b.delete(rd);b.commit().catch(erro);delAsk=''}else delAsk='r'+d.id}
+ else if(a==='rsend'){const i=$('#rin');if(i){const t=i.value;i.value='';rafSend(t)}return}
+ else if(a==='rchip'){rafSend(d.q);return}
+ else if(a==='rccfg')rafEdit=true;
+ else if(a==='rccancel')rafEdit=false;
+ else if(a==='rcsave'){const am=$('#am'),u0=rafUrl($('#rcu').value.trim()),k0=$('#rck').value.trim()||(RAFCFG&&RAFCFG.key)||'',m0=$('#rcm').value.trim();if(!/^https:\/\//i.test(u0)){am.textContent='O link precisa começar com https://';return}if(!k0){am.textContent='Informe a chave da API.';return}if(!m0){am.textContent='Informe o modelo.';return}RAFCFG={url:u0,key:k0,model:m0,anon:$('#rca').checked};rafEdit=false;fs.collection('config').doc('rafael').set({...RAFCFG,updated:new Date().toISOString()}).catch(erro)}
+ else if(a==='rclear'){if(delAsk==='rf'){const refs=RAF.map(m=>fs.collection('rafael').doc(m.id));RAF=[];rafMsg='';commit(refs.map(r=>b=>b.delete(r)));delAsk=''}else delAsk='rf'}
+ else if(a==='pdelp'){if(roleOf(user)!=='a')return;if(delAsk==='p'+d.id){const id=d.id;db.patients=db.patients.filter(x=>x.id!==id);db.sessions=db.sessions.filter(x=>x.pid!==id);db.agenda=(db.agenda||[]).filter(x=>x.pid!==id);save();cur=null;delAsk=''}else delAsk='p'+d.id}
  render();
 });
 document.addEventListener('input',e=>{if(e.target.id==='ob'&&ses)ses.obs=e.target.value});
