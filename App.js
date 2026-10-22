@@ -53,7 +53,7 @@ function after(){
  tid=setTimeout(()=>{
   if(!user)return;
   const ae=document.activeElement||{},typing=['INPUT','TEXTAREA','SELECT'].includes(ae.tagName)&&ae.id!=='cm';
-  if(!ses&&!eg&&!typing)render();
+  if(!ses&&!eg&&!ed&&!typing)render();
  },120);
 }
 /* escuta em tempo real os dados de um profissional (responsáveis só enxergam a própria criança) */
@@ -96,11 +96,12 @@ function startShared(){
  const cl=(q,set)=>UNS.push(q.onSnapshot(s=>{set(s.docs.map(d=>({...d.data(),id:d.id})));after()},e=>console.warn('coms',e.code)));
  if(r==='a')cl(mc,v=>comsA=v);
  else{cl(mc.where('to','==','t'),v=>comsA=v);cl(mc.where('to','==',r==='p'?'p':'f'),v=>comsB=v)}
+ if(r!=='p'){const rc=fs.collection('reports');UNS.push((r==='a'?rc:rc.where('k','==',user.k)).onSnapshot(s=>{REPS=s.docs.map(d=>({...d.data(),id:d.id}));after()},e=>console.warn('reports',e.code)))}
 }
 function stopAll(){
  UNS.splice(0).forEach(f=>{try{f()}catch(e){}});
  [LS,CACHE,LAST].forEach(o=>Object.keys(o).forEach(k=>delete o[k]));
- U=[];uMap={};CHATS=[];comsA=[];comsB=[];
+ U=[];uMap={};CHATS=[];comsA=[];comsB=[];REPS=[];ed=null;relPid='';
 }
 /* cria o login de outra pessoa sem deslogar a administradora (usa um segundo "app" do Firebase) */
 async function criarConta(k,senha){
@@ -155,7 +156,7 @@ function vAuth(){
  if(booting)return logo+'<p class="mu" style="text-align:center">Carregando...</p>';
  return logo+'<div class="card"><label for="lu">Usuário (nome sem espaços)</label><input id="lu" autocomplete="username" autocapitalize="none"><label for="lp">Senha</label><input id="lp" type="password" autocomplete="current-password"><p class="am" id="am">'+esc(authMsg)+'</p><button class="btn pr big" data-a="login">Entrar</button><button class="lnk" data-a="forgot">Esqueci a senha do administrador</button><p class="mu">Não tem acesso? Peça à Tia Tay para criar seu usuário.</p></div>'+instCard();
 }
-function enter(x){stopAll();user=x;uMap={[x.id]:x};U=[x];vk=x.k;startShared();db=roleOf(x)==='p'?EMPTY():load(vk);view=roleOf(x)==='p'?'cal':'pac';cur=null;eg=null;ses=null;cth='';finMsg=null;authMsg='';booting=false;render()}
+function enter(x){stopAll();user=x;uMap={[x.id]:x};U=[x];vk=x.k;startShared();db=roleOf(x)==='p'?EMPTY():load(vk);view=roleOf(x)==='p'?'cal':'pac';cur=null;eg=null;ses=null;cth='';finMsg=null;authMsg='';ed=null;relPid='';booting=false;render()}
 async function doLogin(){
  const ru=$('#lu').value.trim().toLowerCase(),k=ru===ADMIN_MAIL.toLowerCase()?ADMIN.k:norm(ru),raw=$('#lp').value,p=k===ADMIN.k?raw:raw.replace(/\D/g,''),am=$('#am');
  if(!k||!p){am.textContent='Digite usuário e senha.';return}
@@ -309,16 +310,211 @@ function vEq(){
  '<h2>Pais e responsáveis</h2>'+pais+
  '<div class="card"><h3>Criar conta de responsável</h3><label for="rn">Nome do responsável</label><input id="rn"><label for="rc">CPF</label><input id="rc" inputmode="numeric" placeholder="000.000.000-00"><label for="re">Funcionária da criança</label><select id="re">'+emp.map(u=>`<option value="${u.k}">${esc(u.name)}</option>`).join('')+'</select><label for="rp">Criança</label><select id="rp">'+(emp[0]?opts(emp[0].k):'')+'</select><p class="am" id="am2"></p><button class="btn pr big" data-a="radd">Criar conta de responsável</button><p class="mu">A criança precisa estar cadastrada como paciente da funcionária escolhida. O responsável vê só a agenda dela, os comunicados e o chat com a Tia Tay.</p></div>';
 }
-const ALLOW={a:['pac','ses','gra','cal','dad','eq','avi','cha','per'],f:['pac','ses','gra','cal','dad','avi','cha','per'],p:['cal','avi','cha','per']};
+/* ---------- Relatórios (editor tipo Word, salvo na nuvem) ---------- */
+let REPS=[],ed=null,relPid='',edRange=null,edImg=null,edTimer=0;
+const PALETA=['#14101a','#5a189a','#9d4edd','#c77dff','#d1495b','#e09f00','#2b9348','#2a6f97','#735a85','#ffffff'];
+const FONTES=['Figtree','Arial','Georgia','Times New Roman','Verdana','Trebuchet MS','Courier New'];
+const TAMS=[10,12,14,16,18,20,24,28,32,40];
+const SIMPLE=['undo','redo','bold','italic','underline','strikeThrough','subscript','superscript','insertUnorderedList','insertOrderedList','justifyLeft','justifyCenter','justifyRight','justifyFull','indent','outdent','removeFormat','insertHorizontalRule'];
+const dtf=s=>{try{return new Date(s).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}catch(e){return ''}};
+/* remove qualquer coisa perigosa (scripts, onclick, links javascript:) do HTML do relatório */
+function limpa(h){
+ const t=new DOMParser().parseFromString('<body>'+h,'text/html');
+ t.querySelectorAll('script,iframe,object,embed,link,meta,style,form,base,svg,math,audio,video,source,input,button,textarea,select').forEach(n=>n.remove());
+ t.body.querySelectorAll('*').forEach(n=>{
+  [...n.attributes].forEach(a=>{
+   const nm=a.name.toLowerCase(),v=a.value.trim().toLowerCase();
+   if(nm.startsWith('on')||nm==='srcdoc'||nm==='formaction')n.removeAttribute(a.name);
+   else if((nm==='href'||nm==='src'||nm==='xlink:href')&&!/^(https?:|mailto:|#|data:image\/(png|jpe?g|gif|webp);base64,)/.test(v))n.removeAttribute(a.name);
+   else if(nm==='style'&&/url\(|expression|javascript:|@import/.test(v))n.removeAttribute(a.name);
+  });
+  if(n.tagName==='A'){n.setAttribute('target','_blank');n.setAttribute('rel','noopener noreferrer')}
+ });
+ return t.body.innerHTML;
+}
+const tirasel=h=>h.replace(/\sclass="sel"/g,'');
+const setRs=(t,er)=>{const e=$('#rs');if(e){e.textContent=t;e.style.color=er?'var(--er)':''}};
+const schedSave=()=>{clearTimeout(edTimer);edTimer=setTimeout(saveRep,1500)};
+async function saveRep(){
+ clearTimeout(edTimer);
+ if(!ed||ed.html===null||ed.err||!ed.dirty)return;
+ const Pp=$('#paper'),T=$('#rt'),m=REPS.find(x=>x.id===ed.id);if(!Pp||!m)return;
+ const html=tirasel(Pp.innerHTML),title=((T?T.value:ed.title)||'').trim()||'Sem título',kb=Math.round(new Blob([html]).size/1024);
+ if(kb>900){setRs('Relatório grande demais ('+kb+' KB). Remova imagens para salvar.',1);return}
+ ed.html=html;ed.title=title;ed.dirty=false;setRs('Salvando...');
+ const now=new Date().toISOString(),rd=fs.collection('reports').doc(m.id),b=fs.batch();
+ b.set(rd.collection('content').doc('body'),{k:m.k,html,updated:now});
+ b.update(rd,{title,updated:now,size:kb});
+ try{await b.commit();m.title=title;m.updated=now;setRs('Salvo · '+kb+' KB de 900 KB')}
+ catch(e){if(ed)ed.dirty=true;setRs('Erro ao salvar. Tentando de novo...',1);erro(e);setTimeout(saveRep,5000)}
+}
+function openRep(id){
+ ed={id,html:null,dirty:false,tab:'ini'};render();
+ fs.collection('reports').doc(id).collection('content').doc('body').get().then(s=>{
+  if(!ed||ed.id!==id)return;
+  ed.html=limpa(s.exists?s.data().html||'':'');if(!ed.html.trim())ed.html='<p><br></p>';render();
+ }).catch(e=>{erro(e);if(ed&&ed.id===id){ed.err=true;render()}});
+}
+function edFocus(){const Pp=$('#paper');if(!Pp)return;Pp.focus();if(edRange){const s=getSelection();s.removeAllRanges();s.addRange(edRange)}}
+const cellNow=()=>{const s=getSelection();let n=s.anchorNode;if(!n)return null;n=n.nodeType===3?n.parentElement:n;const c=n&&n.closest?n.closest('td,th'):null;return c&&$('#paper').contains(c)?c:null};
+const tblHtml=(r,c)=>{let h='<table class="rt"><tbody>';for(let i=0;i<r;i++){h+='<tr>';for(let j=0;j<c;j++)h+=i?'<td><br></td>':'<th><br></th>';h+='</tr>'}return h+'</tbody></table><p><br></p>'};
+const rowsToTable=rows=>{const w=Math.max(1,...rows.map(r=>r.length));return '<table class="rt"><tbody>'+rows.map((r,i)=>'<tr>'+Array.from({length:w},(_,j)=>{const v=esc(String(r[j]==null?'':r[j]));return i?'<td>'+v+'</td>':'<th>'+v+'</th>'}).join('')+'</tr>').join('')+'</tbody></table><p><br></p>'};
+function parseCSV(t){
+ const f=t.split(/\r?\n/)[0]||'',d=(f.match(/;/g)||[]).length>(f.match(/,/g)||[]).length?';':',',rows=[];let r=[],c='',q=false;
+ for(let i=0;i<t.length;i++){const ch=t[i];
+  if(q){if(ch==='"'){if(t[i+1]==='"'){c+='"';i++}else q=false}else c+=ch}
+  else if(ch==='"')q=true;
+  else if(ch===d){r.push(c);c=''}
+  else if(ch==='\n'||ch==='\r'){if(ch==='\r'&&t[i+1]==='\n')i++;r.push(c);rows.push(r);r=[];c=''}
+  else c+=ch}
+ if(c!==''||r.length){r.push(c);rows.push(r)}
+ return rows.filter(x=>x.some(v=>String(v).trim()!==''));
+}
+const loadXlsx=()=>new Promise((ok,no)=>{if(window.XLSX)return ok();const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';s.onload=ok;s.onerror=()=>no(new Error('xlsx'));document.head.appendChild(s)});
+async function edSheet(f){
+ try{
+  let rows;
+  if(/\.csv$/i.test(f.name))rows=parseCSV(await f.text());
+  else{await loadXlsx();const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:''})}
+  rows=rows.slice(0,500).map(r=>r.slice(0,30));if(!rows.length)throw 0;
+  edFocus();document.execCommand('insertHTML',false,rowsToTable(rows));ed.dirty=true;setRs('Editando...');schedSave();
+ }catch(e){alert('Não foi possível ler a planilha. Use um arquivo .csv ou .xlsx.')}
+}
+/* imagens são reduzidas (até 1000 px) antes de entrar no relatório */
+function edImgInsert(f){
+ const rd=new FileReader();
+ rd.onload=()=>{const im=new Image();im.onload=()=>{
+  const s=Math.min(1,1000/im.width),c=document.createElement('canvas');c.width=Math.max(1,Math.round(im.width*s));c.height=Math.max(1,Math.round(im.height*s));
+  const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(im,0,0,c.width,c.height);
+  edFocus();document.execCommand('insertImage',false,c.toDataURL('image/jpeg',.72));ed.dirty=true;setRs('Editando...');schedSave();
+ };im.src=rd.result};
+ rd.readAsDataURL(f);
+}
+function edCmd(c,v,el){
+ const Pp=$('#paper');if(!Pp||!ed)return;
+ if(c==='tab'){ed.tab=v;document.querySelectorAll('.tbg').forEach(x=>x.classList.toggle('on',x.dataset.g===v));document.querySelectorAll('.ett button').forEach(x=>x.classList.toggle('pr',x.dataset.c===v));return}
+ if(c==='imgpick'){$('#rimg').click();return}
+ if(c==='xl'){$('#rxl').click();return}
+ const m=REPS.find(x=>x.id===ed.id)||{};
+ if(c==='print'){saveRep();const t=$('#rt'),h=$('.ponly h1');if(h&&t)h.textContent=t.value;window.print();return}
+ if(c==='doc'){
+  const t0=(($('#rt')||{}).value||'relatorio'),t=t0.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\w\- ]+/g,'').trim()||'relatorio';
+  const h='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>'+esc(t0)+'</title><style>body{font-family:Arial;font-size:12pt}table{border-collapse:collapse}td,th{border:1px solid #999;padding:4px}th{background:#ecd9f8}img{max-width:100%}</style></head><body><h1>'+esc(t0)+'</h1><p>Paciente: '+esc(m.pname||'')+'</p>'+tirasel(Pp.innerHTML)+'</body></html>';
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff',h],{type:'application/msword'}));a.download=t+'.doc';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);return;
+ }
+ edFocus();
+ document.execCommand('styleWithCSS',false,true);
+ const cell=cellNow();
+ if(['rowadd','coladd','rowdel','coldel','tbldel','cellbg'].includes(c)&&!cell){alert('Clique dentro de uma célula da tabela primeiro.');return}
+ if(SIMPLE.includes(c))document.execCommand(c,false,null);
+ else switch(c){
+  case 'block':document.execCommand('formatBlock',false,v==='p'?'<p>':'<'+v+'>');break;
+  case 'font':document.execCommand('fontName',false,v);break;
+  case 'size':document.execCommand('styleWithCSS',false,false);document.execCommand('fontSize',false,'7');Pp.querySelectorAll('font[size="7"]').forEach(f=>{f.removeAttribute('size');f.style.fontSize=v+'px'});break;
+  case 'fore':case 'forec':document.execCommand('foreColor',false,v);break;
+  case 'back':document.execCommand('hiliteColor',false,v);break;
+  case 'link':{let u=prompt('Endereço do link (ex.: https://...)','https://');if(!u||u==='https://')return;if(!/^(https?:|mailto:)/i.test(u))u='https://'+u;document.execCommand('createLink',false,u);break}
+  case 'table':{const x=(prompt('Linhas x colunas','3x3')||'').match(/(\d+)\D+(\d+)/);if(!x)return;document.execCommand('insertHTML',false,tblHtml(Math.min(+x[1],50),Math.min(+x[2],12)));break}
+  case 'pb':document.execCommand('insertHTML',false,'<hr class="pgbr"><p><br></p>');break;
+  case 'rowadd':{const tr=cell.parentElement,n=tr.cloneNode(true);n.querySelectorAll('td,th').forEach(x=>{x.innerHTML='<br>';x.style.removeProperty('background-color')});tr.after(n);break}
+  case 'coladd':{const i=cell.cellIndex;[...cell.closest('table').rows].forEach(r=>{const x=r.insertCell(i+1);x.innerHTML='<br>'});break}
+  case 'rowdel':{const t=cell.closest('table');cell.parentElement.remove();if(!t.rows.length)t.remove();break}
+  case 'coldel':{const t=cell.closest('table'),i=cell.cellIndex;[...t.rows].forEach(r=>{if(r.cells[i])r.deleteCell(i)});if(!t.rows[0]||!t.rows[0].cells.length)t.remove();break}
+  case 'tbldel':cell.closest('table').remove();break;
+  case 'cellbg':cell.style.backgroundColor=v;break;
+  case 'imgw':if(!edImg){alert('Toque em uma imagem primeiro.');return}edImg.style.width=v;edImg.style.height='auto';break;
+  case 'imgdel':if(!edImg){alert('Toque em uma imagem primeiro.');return}edImg.remove();edImg=null;break;
+  default:return;
+ }
+ ed.dirty=true;setRs('Editando...');schedSave();
+}
+function tbHtml(){
+ const T=ed.tab||'ini',B=(c,t,l,x)=>`<button type="button" class="tb" data-e="${c}"${x||''} title="${t}" aria-label="${t}">${l}</button>`,
+  S=(c,t,o)=>`<select class="tbs" data-e="${c}" aria-label="${t}"><option value="">${t}</option>${o}</select>`,
+  G=(id,h)=>`<div class="tbg${T===id?' on':''}" data-g="${id}">${h}</div>`,
+  C=(c,t,l,v)=>`<label class="tb tbc" title="${t}">${l}<input type="color" data-e="${c}" value="${v}" aria-label="${t}"></label>`;
+ const tabs=[['ini','Início'],['ins','Inserir'],['tab','Tabela'],['img','Imagem'],['arq','Arquivo']].map(([id,l])=>`<button type="button" class="btn${T===id?' pr':''}" data-e="tab" data-c="${id}">${l}</button>`).join('');
+ return `<div class="etb"><div class="ett">${tabs}</div>`+
+ G('ini',B('undo','Desfazer','↶')+B('redo','Refazer','↷')+
+  S('block','Estilo','<option value="p">Parágrafo</option><option value="h1">Título 1</option><option value="h2">Título 2</option><option value="h3">Título 3</option><option value="blockquote">Citação</option>')+
+  S('font','Fonte',FONTES.map(f=>`<option value="${f}">${f}</option>`).join(''))+
+  S('size','Tamanho',TAMS.map(n=>`<option value="${n}">${n}</option>`).join(''))+
+  B('bold','Negrito','<b>N</b>')+B('italic','Itálico','<i>I</i>')+B('underline','Sublinhado','<u>S</u>')+B('strikeThrough','Tachado','<s>T</s>')+B('subscript','Subscrito','x₂')+B('superscript','Sobrescrito','x²')+
+  C('fore','Cor do texto','<span style="border-bottom:3px solid #9d4edd">A</span>','#9d4edd')+C('back','Marca-texto','🖍','#fff59d')+
+  PALETA.map(c=>`<button type="button" class="sw" data-e="forec" data-c="${c}" style="background:${c}" title="Cor ${c}" aria-label="Cor ${c}"></button>`).join('')+
+  B('justifyLeft','Alinhar à esquerda','Esq.')+B('justifyCenter','Centralizar','Centro')+B('justifyRight','Alinhar à direita','Dir.')+B('justifyFull','Justificar','Just.')+
+  B('insertUnorderedList','Lista com marcadores','• Lista')+B('insertOrderedList','Lista numerada','1. Lista')+B('indent','Aumentar recuo','Recuo +')+B('outdent','Diminuir recuo','Recuo −')+B('removeFormat','Limpar formatação','Limpar'))+
+ G('ins',B('link','Inserir link','Link')+B('imgpick','Inserir imagem','Imagem')+B('table','Inserir tabela','Tabela')+B('xl','Importar planilha (.csv ou .xlsx)','Planilha')+B('insertHorizontalRule','Linha horizontal','Linha')+B('pb','Quebra de página','Quebra de página')+'<input type="file" id="rimg" accept="image/*" hidden><input type="file" id="rxl" accept=".csv,.xlsx,.xls" hidden>')+
+ G('tab',B('rowadd','Adicionar linha','+ Linha')+B('coladd','Adicionar coluna','+ Coluna')+B('rowdel','Excluir linha','− Linha')+B('coldel','Excluir coluna','− Coluna')+C('cellbg','Cor da célula','Cor da célula','#ecd9f8')+B('tbldel','Excluir tabela','Excluir tabela'))+
+ G('img',B('imgw','25% da largura','25%',' data-c="25%"')+B('imgw','50% da largura','50%',' data-c="50%"')+B('imgw','100% da largura','100%',' data-c="100%"')+B('imgdel','Remover imagem','Remover imagem'))+
+ G('arq',B('print','Imprimir ou salvar em PDF','Imprimir / PDF')+B('doc','Baixar para o Word (.doc)','Baixar Word (.doc)'))+'</div>';
+}
+function vEd(){
+ const m=REPS.find(x=>x.id===ed.id)||{},bk='<div class="edbar"><button class="lnk" data-a="rclose">‹ Relatórios</button><span id="rs" class="mu"></span></div>';
+ if(ed.err)return bk+'<div class="card"><p class="am">Não foi possível abrir este relatório. Verifique a internet e tente de novo.</p></div>';
+ if(ed.html===null)return bk+'<p class="mu">Carregando...</p>';
+ const ti=ed.title!=null?ed.title:(m.title||'');
+ return bk+`<input id="rt" class="rtitle" value="${esc(ti)}" placeholder="Título do relatório" aria-label="Título do relatório"><p class="mu rinfo">Paciente: <b>${esc(m.pname||'')}</b></p>${tbHtml()}<div id="paper" class="paper" contenteditable="true" spellcheck="true" lang="pt-BR">${ed.html}</div><div class="ponly"><h1></h1><p>Paciente: ${esc(m.pname||'')}</p></div>`;
+}
+function vRel(){
+ if(ed)return vEd();
+ const ad=roleOf(user)==='a';
+ if(!relPid){
+  let h='<h2>Relatórios</h2><p class="mu">Escolha o paciente para ver ou criar relatórios.</p>';
+  h+=db.patients.map(p=>{const n=REPS.filter(x=>x.pid===p.id).length;return `<div class="card row2"><span><b>${esc(p.name)}</b><br><span class="mu">${n} relatório(s)</span></span><button class="btn" data-a="rpat" data-id="${p.id}">Abrir</button></div>`}).join('')||'<p class="mu">Nenhum paciente cadastrado'+(ad?' para este profissional':'')+'.</p>';
+  if(ad&&REPS.length){
+   const nm=k=>(allUsers().find(u=>u.k===k)||{}).name||k;
+   h+='<h3 style="margin-top:18px">Relatórios recentes de toda a clínica</h3>'+[...REPS].sort((a,b)=>a.updated<b.updated?1:-1).slice(0,10).map(x=>`<div class="card row2"><span><b>${esc(x.title||'Sem título')}</b><br><span class="mu">${esc(x.pname||'')} · ${esc(nm(x.k))} · ${dtf(x.updated)}</span></span><button class="btn" data-a="ropen" data-id="${x.id}">Abrir</button></div>`).join('');
+  }
+  return h;
+ }
+ const p=P(relPid);if(!p){relPid='';return vRel()}
+ const L=REPS.filter(x=>x.pid===relPid).sort((a,b)=>a.updated<b.updated?1:-1);
+ return `<button class="lnk" data-a="rpback">‹ Pacientes</button><h2>${esc(p.name)}</h2><button class="btn pr big" data-a="rnew">+ Novo relatório</button><div style="height:12px"></div>`+(L.map(x=>`<div class="card row2"><span><b>${esc(x.title||'Sem título')}</b><br><span class="mu">${dtf(x.updated)} · ${esc(x.byName||'')}</span></span><span class="row" style="margin:0"><button class="btn" data-a="ropen" data-id="${x.id}">Abrir</button><button class="btn" data-a="rdel" data-id="${x.id}">${delAsk==='r'+x.id?'Confirmar':'Excluir'}</button></span></div>`).join('')||'<p class="mu">Nenhum relatório ainda para este paciente.</p>');
+}
+/* eventos do editor */
+document.addEventListener('mousedown',e=>{const b=e.target.closest&&e.target.closest('button[data-e]');if(b)e.preventDefault()});
+document.addEventListener('click',e=>{
+ if(!ed)return;
+ const b=e.target.closest('button[data-e]');
+ if(b){edCmd(b.dataset.e,b.dataset.c,b);return}
+ const im=e.target.closest('#paper img');
+ document.querySelectorAll('#paper img.sel').forEach(i=>i.classList.remove('sel'));
+ edImg=im||null;
+ if(im){im.classList.add('sel');const r=document.createRange();r.selectNode(im);const s=getSelection();s.removeAllRanges();s.addRange(r)}
+});
+document.addEventListener('change',e=>{
+ const t=e.target;if(!ed||!t.dataset)return;
+ if(t.dataset.e&&t.value){edCmd(t.dataset.e,t.value,t);if(t.tagName==='SELECT')t.selectedIndex=0}
+ else if(t.id==='rimg'&&t.files[0]){edImgInsert(t.files[0]);t.value=''}
+ else if(t.id==='rxl'&&t.files[0]){edSheet(t.files[0]);t.value=''}
+});
+document.addEventListener('input',e=>{if(ed&&(e.target.id==='paper'||e.target.id==='rt')){ed.dirty=true;setRs('Editando...');schedSave()}});
+document.addEventListener('selectionchange',()=>{if(!ed)return;const s=getSelection(),Pp=$('#paper');if(Pp&&s.rangeCount&&Pp.contains(s.getRangeAt(0).commonAncestorContainer))edRange=s.getRangeAt(0).cloneRange()});
+document.addEventListener('paste',e=>{
+ if(!ed||!e.target.closest||!e.target.closest('#paper'))return;
+ const cd=e.clipboardData;if(!cd)return;
+ const it=[...(cd.items||[])].find(i=>i.type&&i.type.startsWith('image/'));
+ if(it){e.preventDefault();edImgInsert(it.getAsFile());return}
+ const h=cd.getData('text/html');
+ if(h){e.preventDefault();document.execCommand('insertHTML',false,limpa(h))}
+});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)saveRep()});
+addEventListener('pagehide',()=>saveRep());
+
+const ALLOW={a:['pac','ses','gra','rel','cal','dad','eq','avi','cha','per'],f:['pac','ses','gra','rel','cal','dad','avi','cha','per'],p:['cal','avi','cha','per']};
 function render(){
+ if(ed&&ed.html!==null&&$('#paper')){ed.html=$('#paper').innerHTML;const t=$('#rt');if(t)ed.title=t.value}
  const r=user?roleOf(user):'',ci=$('#cm'),keep=ci?ci.value:'',foc=!!ci&&document.activeElement===ci;
  if(user&&!ALLOW[r].includes(view))view=r==='p'?'cal':'pac';
  $('nav').style.display=user?'flex':'none';$('#out').hidden=!user;$('#me').hidden=!user;
  if(user)$('#me').innerHTML=av(user.k,user.name);
- const bar=r==='a'&&!['eq','avi','cha','per'].includes(view)?`<div class="vbar"><label for="vs">Ver dados de</label><select id="vs">${staff().map(u=>`<option value="${u.k}" ${u.k===vk?'selected':''}>${esc(u.name)}</option>`).join('')}</select></div>`:'';
- $('#main').innerHTML=user?bar+({pac:vPac,ses:vSes,gra:vGra,cal:r==='p'?vAgPai:vCal,dad:vDad,eq:vEq,avi:vAvi,cha:vCha,per:vPer})[view]():vAuth();
+ const bar=r==='a'&&!['eq','avi','cha','per'].includes(view)&&!(view==='rel'&&ed)?`<div class="vbar"><label for="vs">Ver dados de</label><select id="vs">${staff().map(u=>`<option value="${u.k}" ${u.k===vk?'selected':''}>${esc(u.name)}</option>`).join('')}</select></div>`:'';
+ $('#main').innerHTML=user?bar+({pac:vPac,ses:vSes,gra:vGra,cal:r==='p'?vAgPai:vCal,dad:vDad,rel:vRel,eq:vEq,avi:vAvi,cha:vCha,per:vPer})[view]():vAuth();
  document.querySelectorAll('nav button').forEach(b=>{b.dataset.l=b.dataset.l||b.textContent;b.classList.toggle('on',b.dataset.v===view);b.hidden=!(user&&b.dataset.r.includes(r));const n=user?(b.dataset.v==='cha'?unreadChat():b.dataset.v==='avi'?unreadCom():0):0;b.textContent=b.dataset.l+(n?' ('+n+')':'')});
  $('#st').textContent=navigator.onLine?'Online':'Offline';
+ $('#main').classList.toggle('wide',!!(user&&view==='rel'&&ed));
+ if(ed&&$('#rs'))setRs(ed.err?'':ed.dirty?'Alterações não salvas':'Salvo');
  if(flash){const el=$('#'+flash.id);if(el){el.style.color=flash.ok?'var(--ok)':'';el.textContent=flash.txt}}
  const cn=$('#cm');if(cn){cn.value=keep;if(foc||rf0)cn.focus();scrollTo(0,document.body.scrollHeight)}rf0=false;
 }
@@ -330,8 +526,8 @@ document.addEventListener('click',e=>{
  if(a==='login'){doLogin();return}
  if(a==='uadd'){doAddUser();return}
  if(a==='radd'){doAddParent();return}
-if(a==='out'){user=null;ses=null;cur=null;eg=null;authMsg='';auth.signOut()}
-else if(a==='nav'){view=d.v;msg='';delAsk='';eg=null;finMsg=null;cth='';flash=null}
+if(a==='out'){ed=null;relPid='';user=null;ses=null;cur=null;eg=null;authMsg='';auth.signOut()}
+else if(a==='nav'){if(ed){saveRep();ed=null}relPid='';view=d.v;msg='';delAsk='';eg=null;finMsg=null;cth='';flash=null}
  else if(a==='addp'){const n=$('#pn').value.trim();if(!n)return;db.patients.push({id:uid(),name:n,programs:[]});save()}
  else if(a==='open')cur=d.id;
  else if(a==='back'){cur=null;eg=null}
@@ -373,6 +569,12 @@ else if(a==='udel'){if(delAsk==='u'+d.k){apagarUsuario(d.k);delAsk=''}else delAs
  else if(a==='exp'){$('#bk').value=JSON.stringify(db);return}
 else if(a==='imp'){try{const x=JSON.parse($('#bk').value);if(x.patients&&x.sessions){mergeIn(x);save();msg='Backup restaurado.'}else msg='Backup inválido.'}catch(er){msg='Backup inválido.'}}
  else if(a==='mig'){try{const x=JSON.parse(localStorage.getItem(dk(vk))||'null');if(x&&x.patients){mergeIn(x);save();msg='Dados antigos enviados para a nuvem.'}else msg='Não há dados antigos para este usuário.'}catch(er){msg='Não foi possível ler os dados antigos.'}}
+ else if(a==='rpat')relPid=d.id;
+ else if(a==='rpback')relPid='';
+ else if(a==='ropen'){openRep(d.id);return}
+ else if(a==='rclose'){saveRep();ed=null}
+ else if(a==='rnew'){const pt=P(relPid);if(!pt)return;const now=new Date().toISOString(),m={id:uid(),k:vk,pid:pt.id,pname:pt.name,title:'Relatório '+new Date().toLocaleDateString('pt-BR'),by:user.k,byName:user.name,created:now,updated:now,size:1};REPS.push(m);const b=fs.batch(),rd=fs.collection('reports').doc(m.id);b.set(rd,m);b.set(rd.collection('content').doc('body'),{k:m.k,html:'<p><br></p>',updated:now});b.commit().catch(erro);openRep(m.id);return}
+ else if(a==='rdel'){if(delAsk==='r'+d.id){const id=d.id,rd=fs.collection('reports').doc(id),b=fs.batch();REPS=REPS.filter(x=>x.id!==id);b.delete(rd.collection('content').doc('body'));b.delete(rd);b.commit().catch(erro);delAsk=''}else delAsk='r'+d.id}
  render();
 });
 document.addEventListener('input',e=>{if(e.target.id==='ob'&&ses)ses.obs=e.target.value});
@@ -380,7 +582,7 @@ document.addEventListener('change',e=>{
  const i=e.target.id;
  if(i==='sp'){gp=e.target.value;gg='';render()}
  if(i==='sg'){gg=e.target.value;render()}
- if(i==='vs'){vk=e.target.value;db=load(vk);cur=null;eg=null;ses=null;render()}
+ if(i==='vs'){relPid='';vk=e.target.value;db=load(vk);cur=null;eg=null;ses=null;render()}
  if(i==='re'){$('#rp').innerHTML=load(e.target.value).patients.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}
 if(i==='pf'&&e.target.files[0]){const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{const c=document.createElement('canvas'),z=Math.min(im.width,im.height);c.width=c.height=160;c.getContext('2d').drawImage(im,(im.width-z)/2,(im.height-z)/2,z,z,0,0,160,160);setFoto(c.toDataURL('image/jpeg',.8));render()};im.src=rd.result};rd.readAsDataURL(e.target.files[0])}
 });
