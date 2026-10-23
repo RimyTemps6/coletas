@@ -1,10 +1,11 @@
 // Aumente este número só se quiser forçar limpeza do cache antigo.
-const CACHE = 'tiatay-v6';
+const CACHE = 'tiatay-v8';
 const ARQUIVOS = ['./', './index.html', './style.css', './App.js', './firebase-config.js', './manifest.json',
   './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ARQUIVOS)).then(() => self.skipWaiting()));
+  // guarda arquivo por arquivo: se um faltar, a instalação do app não quebra
+  e.waitUntil(caches.open(CACHE).then(c => Promise.allSettled(ARQUIVOS.map(a => c.add(a)))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {

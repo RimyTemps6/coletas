@@ -124,3 +124,5 @@ main.wide{max-width:900px}
 .rec{background:#fde8ee;color:#b00020;border:1px solid #f3b6c4;border-radius:10px;padding:6px 12px;margin-bottom:10px;font-weight:600;font-size:14px}
 .rec.off{background:var(--card);color:var(--mu);border-color:var(--bd);font-weight:400}
 input[type=range]{width:100%;margin:8px 0 0}
+.cron-t{font-size:40px;font-weight:700;text-align:center;font-variant-numeric:tabular-nums;letter-spacing:1px}
+.cron-s{text-align:center}.cron-s.ok{color:var(--ok);font-weight:600}
