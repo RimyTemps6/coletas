@@ -119,3 +119,8 @@ main.wide{max-width:900px}
 
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
 .btn.ce.big{width:100%}
+.racao{align-self:flex-start;max-width:92%}
+.racao .mu{white-space:pre-wrap;overflow-wrap:anywhere}
+.rec{background:#fde8ee;color:#b00020;border:1px solid #f3b6c4;border-radius:10px;padding:6px 12px;margin-bottom:10px;font-weight:600;font-size:14px}
+.rec.off{background:var(--card);color:var(--mu);border-color:var(--bd);font-weight:400}
+input[type=range]{width:100%;margin:8px 0 0}
