@@ -1,5 +1,5 @@
 // Aumente este número só se quiser forçar limpeza do cache antigo.
-const CACHE = 'tiatay-v8';
+const CACHE = 'tiatay-v9';
 const ARQUIVOS = ['./', './index.html', './style.css', './App.js', './firebase-config.js', './manifest.json',
   './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 

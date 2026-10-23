@@ -122,7 +122,7 @@ function startShared(){
 function stopAll(){
  UNS.splice(0).forEach(f=>{try{f()}catch(e){}});
  [LS,CACHE,LAST].forEach(o=>Object.keys(o).forEach(k=>delete o[k]));
- U=[];uMap={};CHATS=[];comsA=[];comsB=[];REPS=[];ed=null;relPid='';RAFCFG=undefined;RAF=[];PONTO=[];SESS=[];try{liveStop();liveUnlisten();pbStop()}catch(e){}rafBusy=false;rafMsg='';rafEdit=false;
+ U=[];uMap={};CHATS=[];comsA=[];comsB=[];REPS=[];ed=null;relPid='';RAFCFG=undefined;RAF=[];PONTO=[];SESS=[];try{liveStop();liveUnlisten();pbStop();vozStop()}catch(e){}rafBusy=false;rafMsg='';rafEdit=false;
 }
 /* cria o login de outra pessoa sem deslogar a administradora (usa um segundo "app" do Firebase) */
 async function criarConta(k,senha){
@@ -530,6 +530,53 @@ addEventListener('pagehide',()=>saveRep());
 
 /* ---------- Rafael: assistente de IA exclusivo da administradora ---------- */
 let RAFCFG,RAF=[],rafBusy=false,rafMsg='',rafEdit=false;
+
+/* ---------- Voz do Rafael (Fish Audio) ----------
+   Tudo fica no MESMO documento config/rafael (campos vkey, vid, vmodel, von). Nenhuma coleção nova. */
+const VOZ={el:null,seq:0,id:'',load:false,fim:null};
+const vozOk=()=>!!(RAFCFG&&RAFCFG.vkey&&RAFCFG.von!==false);
+const vozEl=()=>VOZ.el||(VOZ.el=new Audio());
+/* o navegador só deixa o áudio tocar sozinho se ele foi "liberado" por um toque: fazemos isso ao enviar */
+function vozUnlock(){try{const a=vozEl();a.src='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';const p=a.play();if(p&&p.catch)p.catch(()=>{})}catch(e){}}
+function vozStop(){VOZ.seq++;VOZ.id='';VOZ.load=false;try{const a=vozEl();a.pause();a.removeAttribute('src');a.load()}catch(e){}if(VOZ.fim){const f=VOZ.fim;VOZ.fim=null;f()}}
+function vozTexto(t){
+ let s=String(t||'');
+ s=RAFCFG&&RAFCFG.anon===false?unanon(s):s.replace(/Paciente_[a-z0-9]+/g,'o paciente');
+ return s.replace(/\[\[ACAO\]\][\s\S]*?\[\[\/ACAO\]\]/g,' ').replace(/<[^>]+>/g,' ').replace(/https?:\/\/\S+/g,' ').replace(/^\s*[-•*]\s+/gm,'').replace(/[*_#`>~|]+/g,' ').replace(/\s+/g,' ').trim();
+}
+function vozPartes(s){const out=[];let cur='';(s.match(/[^.!?\n]+[.!?]*\s*/g)||[s]).forEach(x=>{if(cur&&(cur+x).length>350){out.push(cur.trim());cur=''}cur+=x});if(cur.trim())out.push(cur.trim());return out.slice(0,10)}
+async function vozBaixa(txt,c){
+ const ctl=new AbortController(),to=setTimeout(()=>ctl.abort(),60000);
+ try{
+  const body={text:txt,format:'mp3',latency:'normal'};if(c.vid)body.reference_id=c.vid;
+  const r=await fetch('https://api.fish.audio/v1/tts',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.vkey,'model':c.vmodel||'s2-pro'},body:JSON.stringify(body),signal:ctl.signal});
+  if(!r.ok){let m='';try{const j=await r.json();m=j.message||j.detail||''}catch(e){}throw new Error(r.status===401?'chave da Fish Audio inválida.':r.status===402?'sem créditos na Fish Audio.':(typeof m==='string'&&m?m:'erro '+r.status))}
+  return URL.createObjectURL(await r.blob());
+ }finally{clearTimeout(to)}
+}
+async function vozFalar(id,txt){
+ const c=RAFCFG;if(!c||!c.vkey)return;
+ vozStop();const my=VOZ.seq;
+ const partes=vozPartes(vozTexto(txt));if(!partes.length)return;
+ VOZ.id=id;VOZ.load=true;render();
+ const a=vozEl();
+ try{
+  let prox=vozBaixa(partes[0],c);
+  for(let i=0;i<partes.length;i++){
+   const url=await prox;
+   if(my!==VOZ.seq){URL.revokeObjectURL(url);return}
+   prox=i+1<partes.length?vozBaixa(partes[i+1],c):null;if(prox)prox.catch(()=>{});
+   VOZ.load=false;if(i===0)render();
+   await new Promise((ok,no)=>{VOZ.fim=ok;a.onended=ok;a.onerror=()=>no(new Error('não consegui tocar o áudio.'));a.src=url;const p=a.play();if(p&&p.catch)p.catch(no)});
+   URL.revokeObjectURL(url);
+   if(my!==VOZ.seq)return;
+  }
+ }catch(e){
+  if(my===VOZ.seq)rafMsg='Voz: '+(e.name==='AbortError'?'a Fish Audio demorou demais.':e.name==='NotAllowedError'?'o navegador bloqueou o som automático. Toque em Ouvir na mensagem.':e instanceof TypeError?'não consegui falar com a Fish Audio. Veja a internet e a chave.':e.message);
+ }
+ if(my===VOZ.seq){VOZ.id='';VOZ.load=false;VOZ.fim=null;render()}
+}
+const vozBtn=id=>`<button class="btn" data-a="vfala" data-id="${id}" style="padding:4px 10px;font-size:13px;margin-top:6px">${VOZ.id===id?(VOZ.load?'⏳ Gerando voz... (toque para cancelar)':'⏹ Parar'):'🔊 Ouvir'}</button>`;
 const REPBODY={};
 const fdt=s=>{try{return new Date(s).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(e){return ''}};
 const cut=(s,n)=>{s=String(s==null?'':s);return s.length>n?s.slice(0,n)+'…':s};
@@ -612,7 +659,7 @@ async function rafSend(txt){
   let out=js&&js.choices&&js.choices[0]&&js.choices[0].message&&js.choices[0].message.content;
   if(!out)throw new Error('A API respondeu vazio.');
   out=String(out).replace(/<think>[\s\S]*?<\/think>/g,'').trim();
-  const pa=parseAcoes(out);if(!pa.acoes.length){const fb=rafFallback(txt);if(fb){pa.acoes.push(fb);if(!pa.limpo||/n[ãa]o (posso|consigo|tenho|é possível)/i.test(pa.limpo))pa.limpo='Preparei a mensagem. Confira abaixo e toque em Confirmar para enviar.'}}const am={id:uid(),role:'assistant',txt:pa.limpo||'Certo. Confira a ação abaixo.',t:new Date().toISOString()};if(pa.acoes.length)am.acoes=pa.acoes;RAF.push(am);fs.collection('rafael').doc(am.id).set(am).catch(erro);
+  const pa=parseAcoes(out);if(!pa.acoes.length){const fb=rafFallback(txt);if(fb){pa.acoes.push(fb);if(!pa.limpo||/n[ãa]o (posso|consigo|tenho|é possível)/i.test(pa.limpo))pa.limpo='Preparei a mensagem. Confira abaixo e toque em Confirmar para enviar.'}}const am={id:uid(),role:'assistant',txt:pa.limpo||'Certo. Confira a ação abaixo.',t:new Date().toISOString()};if(pa.acoes.length)am.acoes=pa.acoes;RAF.push(am);fs.collection('rafael').doc(am.id).set(am).catch(erro);if(vozOk())setTimeout(()=>vozFalar(am.id,am.txt),0);
  }catch(e){
   rafMsg=e.name==='AbortError'?'A API demorou demais. Tente de novo.':(e instanceof TypeError?'Não consegui falar com a API. Veja a internet, o link da API e se ela aceita chamadas do navegador.':'Erro da API: '+e.message);
  }
@@ -699,13 +746,13 @@ async function rafAcao(mid,i,v){
 }
 function vRafCfg(){
  const c=RAFCFG||{};
- return `<h2>Rafael</h2><div class="card"><h3>${RAFCFG?'Trocar a API do Rafael':'Conectar o Rafael'}</h3><p class="mu">Informe o link da API, a chave e o modelo. Fica salvo na nuvem (só a administradora lê) e não será pedido de novo.</p><label for="rcu">Link da API (https)</label><input id="rcu" value="${esc(c.url||'https://api.apinex.bond/v1/chat/completions')}" autocapitalize="none" autocomplete="off"><label for="rck">Chave da API</label><input id="rck" type="password" autocomplete="off" placeholder="${RAFCFG?'Deixe em branco para manter a chave atual':'sk-...'}"><label for="rcm">Modelo</label><input id="rcm" value="${esc(c.model||'free/deepseek-v4.1-flash')}" autocapitalize="none" autocomplete="off"><label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px"><input id="rca" type="checkbox" style="width:auto;margin:4px 0 0" ${c.anon===false?'':'checked'}><span>Proteger nomes dos pacientes (a IA recebe códigos no lugar dos nomes)</span></label><label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px"><input id="rcl" type="checkbox" style="width:auto;margin:4px 0 0" ${c.rot?'checked':''}><span>Identificar as mensagens como enviadas pelo Rafael (por padrão elas saem como se fossem suas)</span></label><p class="am" id="am"></p><button class="btn pr big" data-a="rcsave">Salvar</button>${RAFCFG?'<div style="height:8px"></div><button class="btn big" data-a="rccancel">Cancelar</button>':''}</div>`;
+ return `<h2>Rafael</h2><div class="card"><h3>${RAFCFG?'Trocar a API do Rafael':'Conectar o Rafael'}</h3><p class="mu">Informe o link da API, a chave e o modelo. Fica salvo na nuvem (só a administradora lê) e não será pedido de novo.</p><label for="rcu">Link da API (https)</label><input id="rcu" value="${esc(c.url||'https://api.apinex.bond/v1/chat/completions')}" autocapitalize="none" autocomplete="off"><label for="rck">Chave da API</label><input id="rck" type="password" autocomplete="off" placeholder="${RAFCFG?'Deixe em branco para manter a chave atual':'sk-...'}"><label for="rcm">Modelo</label><input id="rcm" value="${esc(c.model||'free/deepseek-v4.1-flash')}" autocapitalize="none" autocomplete="off"><label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px"><input id="rca" type="checkbox" style="width:auto;margin:4px 0 0" ${c.anon===false?'':'checked'}><span>Proteger nomes dos pacientes (a IA recebe códigos no lugar dos nomes)</span></label><label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px"><input id="rcl" type="checkbox" style="width:auto;margin:4px 0 0" ${c.rot?'checked':''}><span>Identificar as mensagens como enviadas pelo Rafael (por padrão elas saem como se fossem suas)</span></label><p class="am" id="am"></p><button class="btn pr big" data-a="rcsave">Salvar</button>${RAFCFG&&RAFCFG.url?'<div style="height:8px"></div><button class="btn big" data-a="rccancel">Cancelar</button>':''}</div><div class="card"><h3>Voz do Rafael (Fish Audio)</h3><p class="mu">Ao salvar, o Rafael passa a falar as respostas com a voz que você escolher. Fica salvo junto da configuração dele, na nuvem (só a administradora lê).</p><label for="rvk">Chave da API da Fish Audio</label><input id="rvk" type="password" autocomplete="off" placeholder="${c.vkey?'Deixe em branco para manter a chave atual':'Cole a chave da Fish Audio'}"><label for="rvi">ID da voz (ou o link da voz no fish.audio)</label><input id="rvi" value="${esc(c.vid||'')}" autocapitalize="none" autocomplete="off" placeholder="Em branco = voz padrão"><label for="rvm">Modelo</label><input id="rvm" value="${esc(c.vmodel||'s2-pro')}" autocapitalize="none" autocomplete="off"><label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px"><input id="rvo" type="checkbox" style="width:auto;margin:4px 0 0" ${c.von===false?'':'checked'}><span>Falar as respostas automaticamente</span></label><p class="am" id="am6"></p><button class="btn pr big" data-a="rvsave">Salvar voz</button>${c.vkey?'<div style="height:8px"></div><button class="btn big" data-a="rvdel">Remover voz</button>':''}</div>`;
 }
 function vRaf(){
  if(RAFCFG===undefined)return '<h2>Rafael</h2><p class="mu">Carregando...</p>';
- if(!RAFCFG||rafEdit)return vRafCfg();
+ if(!RAFCFG||!RAFCFG.url||rafEdit)return vRafCfg();
  const sug=['Faça um resumo das sessões da última semana','Quais pacientes tiveram queda no desempenho?','Resuma os relatórios mais recentes','O que as funcionárias conversaram comigo no chat?'];
- return `<div class="chead"><b>Rafael</b><span class="mu">assistente da administração (Tia Tay e Rimy)</span></div><div class="row" style="margin:0 0 10px"><button class="btn" data-a="rccfg">Trocar API</button><button class="btn" data-a="rclear">${delAsk==='rf'?'Confirmar limpar':'Limpar conversa'}</button></div><div class="msgs">${RAF.map(m=>`<div class="bub ${m.role==='user'?'me':'ot'}">${m.role==='user'&&m.by&&m.by!==user.name?'<b>'+esc(m.by)+':</b> ':''}${rafHtml(m.txt)}<small>${hm(m.t)}</small></div>`+acoesHtml(m)).join('')||'<p class="mu">Pergunte sobre relatórios, sessões, pacientes, agenda ou conversas do chat.</p>'}${rafBusy?'<div class="bub ot">Rafael está pensando...</div>':''}${rafMsg?`<div class="bub ot" style="border-color:var(--er);color:var(--er)">${esc(rafMsg)}</div>`:''}</div>${RAF.length?'':'<div class="chips">'+sug.map(q=>`<button class="chip" data-a="rchip" data-q="${esc(q)}">${esc(q)}</button>`).join('')+'</div>'}<div class="cbar"><input id="rin" placeholder="Pergunte ao Rafael" autocomplete="off"><button class="btn pr" data-a="rsend">Enviar</button></div>`;
+ return `<div class="chead"><b>Rafael</b><span class="mu">assistente da administração (Tia Tay e Rimy)</span></div><div class="row" style="margin:0 0 10px"><button class="btn" data-a="rccfg">Trocar API</button>${RAFCFG.vkey?`<button class="btn" data-a="vtog">${RAFCFG.von===false?'🔇 Voz desligada':'🔊 Voz ligada'}</button>`:''}<button class="btn" data-a="rclear">${delAsk==='rf'?'Confirmar limpar':'Limpar conversa'}</button></div><div class="msgs">${RAF.map(m=>`<div class="bub ${m.role==='user'?'me':'ot'}">${m.role==='user'&&m.by&&m.by!==user.name?'<b>'+esc(m.by)+':</b> ':''}${rafHtml(m.txt)}<small>${hm(m.t)}</small>${m.role!=='user'&&RAFCFG.vkey?'<br>'+vozBtn(m.id):''}</div>`+acoesHtml(m)).join('')||'<p class="mu">Pergunte sobre relatórios, sessões, pacientes, agenda ou conversas do chat.</p>'}${rafBusy?'<div class="bub ot">Rafael está pensando...</div>':''}${rafMsg?`<div class="bub ot" style="border-color:var(--er);color:var(--er)">${esc(rafMsg)}</div>`:''}</div>${RAF.length?'':'<div class="chips">'+sug.map(q=>`<button class="chip" data-a="rchip" data-q="${esc(q)}">${esc(q)}</button>`).join('')+'</div>'}<div class="cbar"><input id="rin" placeholder="Pergunte ao Rafael" autocomplete="off"><button class="btn pr" data-a="rsend">Enviar</button></div>`;
 }
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&e.target.id==='rin'){e.preventDefault();const b=document.querySelector('[data-a=rsend]');if(b)b.click()}});
 
@@ -1047,11 +1094,15 @@ else if(a==='imp'){try{const x=JSON.parse($('#bk').value);if(x.patients&&x.sessi
  else if(a==='pdelr'){if(roleOf(user)!=='a')return;if(delAsk==='o'+d.id){PONTO=PONTO.filter(x=>x.id!==d.id);fs.collection('ponto').doc(d.id).delete().catch(erro);delAsk=''}else delAsk='o'+d.id}
  else if(a==='rdel'){if(delAsk==='r'+d.id){const id=d.id,rd=fs.collection('reports').doc(id),b=fs.batch();REPS=REPS.filter(x=>x.id!==id);b.delete(rd.collection('content').doc('body'));b.delete(rd);b.commit().catch(erro);delAsk=''}else delAsk='r'+d.id}
  else if(a==='racao'){rafAcao(d.m,+d.i,d.v);return}
- else if(a==='rsend'){const i=$('#rin');if(i){const t=i.value;i.value='';rafSend(t)}return}
- else if(a==='rchip'){rafSend(d.q);return}
+ else if(a==='rsend'){vozUnlock();const i=$('#rin');if(i){const t=i.value;i.value='';rafSend(t)}return}
+ else if(a==='rchip'){vozUnlock();rafSend(d.q);return}
+ else if(a==='vfala'){if(VOZ.id===d.id)vozStop();else{vozUnlock();const m=RAF.find(x=>x.id===d.id);if(m){vozFalar(m.id,m.txt);return}}}
+ else if(a==='vtog'){if(RAFCFG){const on=RAFCFG.von===false;RAFCFG.von=on;if(!on)vozStop();fs.collection('config').doc('rafael').update({von:on}).catch(erro)}}
+ else if(a==='rvsave'){const am=$('#am6'),k1=$('#rvk').value.trim()||(RAFCFG&&RAFCFG.vkey)||'',m1=$('#rvm').value.trim()||'s2-pro';let i1=$('#rvi').value.trim();const mm=i1.match(/\/m\/([A-Za-z0-9]+)/);if(mm)i1=mm[1];if(!k1){am.textContent='Informe a chave da Fish Audio.';return}if(!/^[A-Za-z0-9_-]*$/.test(i1)){am.textContent='O ID da voz só pode ter letras e números. Cole o ID ou o link da voz.';return}RAFCFG={...(RAFCFG||{}),vkey:k1,vid:i1,vmodel:m1,von:$('#rvo').checked};if(RAFCFG.url)rafEdit=false;fs.collection('config').doc('rafael').set({...RAFCFG,updated:new Date().toISOString()},{merge:true}).catch(erro)}
+ else if(a==='rvdel'){vozStop();if(RAFCFG){const FV=firebase.firestore.FieldValue;delete RAFCFG.vkey;delete RAFCFG.vid;delete RAFCFG.vmodel;delete RAFCFG.von;fs.collection('config').doc('rafael').update({vkey:FV.delete(),vid:FV.delete(),vmodel:FV.delete(),von:FV.delete()}).catch(erro)}}
  else if(a==='rccfg')rafEdit=true;
  else if(a==='rccancel')rafEdit=false;
- else if(a==='rcsave'){const am=$('#am'),u0=rafUrl($('#rcu').value.trim()),k0=$('#rck').value.trim()||(RAFCFG&&RAFCFG.key)||'',m0=$('#rcm').value.trim();if(!/^https:\/\//i.test(u0)){am.textContent='O link precisa começar com https://';return}if(!k0){am.textContent='Informe a chave da API.';return}if(!m0){am.textContent='Informe o modelo.';return}RAFCFG={url:u0,key:k0,model:m0,anon:$('#rca').checked,rot:$('#rcl').checked};rafEdit=false;fs.collection('config').doc('rafael').set({...RAFCFG,updated:new Date().toISOString()}).catch(erro)}
+ else if(a==='rcsave'){const am=$('#am'),u0=rafUrl($('#rcu').value.trim()),k0=$('#rck').value.trim()||(RAFCFG&&RAFCFG.key)||'',m0=$('#rcm').value.trim();if(!/^https:\/\//i.test(u0)){am.textContent='O link precisa começar com https://';return}if(!k0){am.textContent='Informe a chave da API.';return}if(!m0){am.textContent='Informe o modelo.';return}RAFCFG={...(RAFCFG||{}),url:u0,key:k0,model:m0,anon:$('#rca').checked,rot:$('#rcl').checked};rafEdit=false;fs.collection('config').doc('rafael').set({...RAFCFG,updated:new Date().toISOString()}).catch(erro)}
  else if(a==='rclear'){if(delAsk==='rf'){const refs=RAF.map(m=>fs.collection('rafael').doc(m.id));RAF=[];rafMsg='';commit(refs.map(r=>b=>b.delete(r)));delAsk=''}else delAsk='rf'}
  else if(a==='pdelp'){if(roleOf(user)!=='a')return;if(delAsk==='p'+d.id){const id=d.id;db.patients=db.patients.filter(x=>x.id!==id);db.sessions=db.sessions.filter(x=>x.pid!==id);db.agenda=(db.agenda||[]).filter(x=>x.pid!==id);save();cur=null;delAsk=''}else delAsk='p'+d.id}
  render();
